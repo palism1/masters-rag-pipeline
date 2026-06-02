@@ -13,8 +13,8 @@ os.environ["DRY_RUN"] = "true"
 
 import pytest
 
-from stage2_xbrl_eval import chunks_to_rows, evaluate_xbrl
-from period_tagging_smoke_test import regex_tag
+from evaluation.xbrl_eval import chunks_to_rows, evaluate_xbrl
+from evaluation.tagger import regex_tag
 
 
 # ---------------------------------------------------------------------------

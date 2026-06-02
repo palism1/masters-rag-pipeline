@@ -18,7 +18,7 @@ Usage:
 
 from __future__ import annotations
 
-from xbrl_loader import XbrlFact
+from .xbrl_loader import XbrlFact
 
 
 def _humanize_value(value: float, unit: str) -> str:

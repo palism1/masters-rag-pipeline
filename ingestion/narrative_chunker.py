@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from datetime import date as _date
 
-from xbrl_chunker import _humanize_value
-from xbrl_loader import XbrlFact
+from .xbrl_chunker import _humanize_value
+from .xbrl_loader import XbrlFact
 
 _CONCEPT_TO_PROSE: dict[str, str] = {
     "RevenueFromContractWithCustomerExcludingAssessedTax": "net revenue",

@@ -12,8 +12,8 @@ The key contrast:
   NVDA — January year-end                      → regex wrong on quarterly prose
 
 Usage:
-    python make_summary.py               # all four tickers
-    python make_summary.py AAPL GOOG     # subset
+    python -m evaluation.make_summary               # all four tickers
+    python -m evaluation.make_summary AAPL GOOG     # subset
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ from pathlib import Path
 os.environ["DRY_RUN"] = "true"
 
 import config  # noqa: E402
-from make_report import make_report
-from xbrl_loader import DEFAULT_CONCEPTS
+from .make_report import make_report
+from ingestion.xbrl_loader import DEFAULT_CONCEPTS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
 

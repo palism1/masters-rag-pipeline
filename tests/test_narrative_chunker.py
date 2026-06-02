@@ -21,7 +21,7 @@ from typing import Optional
 
 import pytest
 
-from narrative_chunker import facts_to_narrative_chunks
+from ingestion.narrative_chunker import facts_to_narrative_chunks
 
 
 # ---------------------------------------------------------------------------

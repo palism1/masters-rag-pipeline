@@ -24,8 +24,8 @@ os.environ["DRY_RUN"] = "true"
 
 import pytest
 
-from xbrl_loader import XbrlFact, load_company_facts
-from xbrl_chunker import facts_to_chunks
+from ingestion.xbrl_loader import XbrlFact, load_company_facts
+from ingestion.xbrl_chunker import facts_to_chunks
 
 # ---------------------------------------------------------------------------
 # Reference constants — match these against the official 10-Q before trusting

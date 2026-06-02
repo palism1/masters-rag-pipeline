@@ -1,5 +1,6 @@
 .env
 edgar_cache/
+chroma_db/
 __pycache__/
 *.pyc
 *.pyo
@@ -10,7 +11,7 @@ venv/
 dist/
 build/
 
-# Generated HTML reports (regenerate with: python make_summary.py)
+# Generated HTML reports (regenerate with: python -m evaluation.make_summary)
 report_*.html
 
 # Unrelated scripts

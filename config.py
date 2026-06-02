@@ -26,6 +26,9 @@ if not SEC_USER_AGENT or "YOUR_EMAIL_HERE" in SEC_USER_AGENT:
 EDGAR_CACHE_DIR: Path = Path(os.getenv("EDGAR_CACHE_DIR", "./edgar_cache"))
 EDGAR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+CHROMA_DIR: Path = Path(os.getenv("CHROMA_DIR", "./chroma_db"))
+CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+
 # Safety flag: True blocks any code path that would write to a vector store / DB.
 # Flip to False only after dry-run output has been manually verified correct.
 DRY_RUN: bool = os.getenv("DRY_RUN", "true").lower() in ("1", "true", "yes")

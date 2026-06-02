@@ -6,9 +6,9 @@ table, and exits without writing anything to any store. Use this to verify
 the pipeline is producing correct values before flipping DRY_RUN=false.
 
 Usage:
-    python xbrl_dry_run.py                  # defaults: AAPL, default concepts
-    python xbrl_dry_run.py MSFT GOOG        # multiple tickers
-    python xbrl_dry_run.py AAPL --concepts RevenueFromContractWithCustomerExcludingAssessedTax NetIncomeLoss
+    python -m scripts.xbrl_dry_run                  # defaults: AAPL, default concepts
+    python -m scripts.xbrl_dry_run MSFT GOOG        # multiple tickers
+    python -m scripts.xbrl_dry_run AAPL --concepts RevenueFromContractWithCustomerExcludingAssessedTax NetIncomeLoss
 
 Config is read from .env — DRY_RUN is forced True regardless of .env setting.
 """
@@ -24,8 +24,8 @@ import sys
 os.environ["DRY_RUN"] = "true"
 
 import config  # noqa: E402 — must come after env override
-from xbrl_loader import DEFAULT_CONCEPTS, load_company_facts
-from xbrl_chunker import facts_to_chunks
+from ingestion.xbrl_loader import DEFAULT_CONCEPTS, load_company_facts
+from ingestion.xbrl_chunker import facts_to_chunks
 
 logging.basicConfig(
     level=logging.INFO,

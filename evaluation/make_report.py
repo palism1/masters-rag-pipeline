@@ -7,10 +7,10 @@ Two modes:
                        No fiscal label in the text. Tests the non-calendar fiscal year problem.
 
 Usage:
-    python make_report.py                        # AAPL xbrl mode
-    python make_report.py AAPL --narrative       # AAPL narrative mode
-    python make_report.py MSFT GOOG --narrative  # multiple tickers, narrative mode
-    python make_report.py AAPL --concepts NetIncomeLoss EarningsPerShareBasic
+    python -m evaluation.make_report                        # AAPL xbrl mode
+    python -m evaluation.make_report AAPL --narrative       # AAPL narrative mode
+    python -m evaluation.make_report MSFT GOOG --narrative  # multiple tickers, narrative mode
+    python -m evaluation.make_report AAPL --concepts NetIncomeLoss EarningsPerShareBasic
 """
 
 from __future__ import annotations
@@ -26,11 +26,11 @@ os.environ["DRY_RUN"] = "true"
 import pandas as pd
 
 import config  # noqa: E402
-from xbrl_loader import DEFAULT_CONCEPTS, load_company_facts
-from xbrl_chunker import facts_to_chunks
-from narrative_chunker import facts_to_narrative_chunks
-from stage2_xbrl_eval import chunks_to_rows
-from period_tagging_smoke_test import regex_tag, similarity_tag_all
+from ingestion.xbrl_loader import DEFAULT_CONCEPTS, load_company_facts
+from ingestion.xbrl_chunker import facts_to_chunks
+from ingestion.narrative_chunker import facts_to_narrative_chunks
+from .xbrl_eval import chunks_to_rows
+from .tagger import regex_tag, similarity_tag_all
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
 

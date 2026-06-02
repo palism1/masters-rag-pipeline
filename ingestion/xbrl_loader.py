@@ -131,7 +131,7 @@ def _dedup(candidates: list[XbrlFact]) -> list[XbrlFact]:
 # ---------------------------------------------------------------------------
 
 def load_company_facts(
-    ticker: str,
+    ticker: str | int,
     concepts: list[str] | None = None,
     form_types: frozenset[str] | None = None,
 ) -> list[XbrlFact]:
@@ -141,7 +141,9 @@ def load_company_facts(
     Parameters
     ----------
     ticker:
-        Exchange ticker symbol (e.g. "AAPL", "MSFT").
+        Exchange ticker symbol (e.g. "AAPL", "MSFT") or integer CIK.
+        Use CIK for companies whose ticker is not resolvable by edgartools
+        (e.g. Foot Locker CIK=850209, Activision CIK=718877).
     concepts:
         US-GAAP concept names to include. Defaults to DEFAULT_CONCEPTS.
     form_types:

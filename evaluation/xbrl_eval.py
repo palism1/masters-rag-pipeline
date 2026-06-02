@@ -7,9 +7,9 @@ are inferred or regex-extracted.  Imports regex_tag and similarity_tag_all from
 the Stage-1 file unchanged so accuracy numbers are directly comparable.
 
 Usage:
-    python stage2_xbrl_eval.py                   # AAPL, default concepts
-    python stage2_xbrl_eval.py MSFT GOOG NVDA    # multiple tickers
-    python stage2_xbrl_eval.py AAPL --concepts NetIncomeLoss EarningsPerShareBasic
+    python -m evaluation.xbrl_eval                   # AAPL, default concepts
+    python -m evaluation.xbrl_eval MSFT GOOG NVDA    # multiple tickers
+    python -m evaluation.xbrl_eval AAPL --concepts NetIncomeLoss EarningsPerShareBasic
 """
 
 from __future__ import annotations
@@ -23,9 +23,9 @@ from collections import defaultdict
 os.environ["DRY_RUN"] = "true"
 
 import config  # noqa: E402
-from xbrl_loader import DEFAULT_CONCEPTS, load_company_facts
-from xbrl_chunker import facts_to_chunks
-from period_tagging_smoke_test import regex_tag, similarity_tag_all
+from ingestion.xbrl_loader import DEFAULT_CONCEPTS, load_company_facts
+from ingestion.xbrl_chunker import facts_to_chunks
+from .tagger import regex_tag, similarity_tag_all
 
 logging.basicConfig(
     level=logging.INFO,
