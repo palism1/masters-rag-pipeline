@@ -13,6 +13,15 @@ This makes the failure mode visible: when baseline retrieval returns wrong-perio
 chunks, Claude will answer with a wrong number AND cite the wrong period — the
 error is traceable to retrieval, not to the model.
 
+FILE MAP
+  L001–L032  Module docstring + file map
+  L034–L063  Imports + CONFIG (model, token limit, k)
+  L065–L080  Lazy client singleton
+  L082–L110  Prompt construction — system prompt + chunk formatter
+  L112–L130  Response parser — extracts structured fields from Claude output
+  L132–L165  generate() — single-mode API call
+  L167–L205  generate_both() — primary entry point, calls both modes
+
 Usage
 -----
     from retrieval.generator import generate_both
@@ -38,9 +47,24 @@ from retrieval.retriever import retrieve_both
 
 logger = logging.getLogger(__name__)
 
-MODEL      = "claude-haiku-4-5-20251001"
+# ===========================================================================
+# CONFIG
+# ===========================================================================
+
+# Generation model. Haiku is cheapest and sufficient for structured extraction.
+# CHANGE ME: swap to "claude-sonnet-4-6" to test whether a stronger model
+# compensates for wrong-period retrieval (thesis ablation).
+MODEL = "claude-haiku-4-5-20251001"
+
+# Max tokens for Claude response — 512 is enough for the structured 4-line format.
+# TWEAK: increase if answers are being truncated.
 MAX_TOKENS = 512
-TOP_K      = 5
+
+# Number of chunks passed to Claude as context per call.
+# TWEAK: increase to give Claude more evidence; watch for context window limits.
+TOP_K = 5
+
+# ===========================================================================
 
 _client: anthropic.Anthropic | None = None
 

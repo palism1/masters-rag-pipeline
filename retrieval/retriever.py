@@ -13,6 +13,13 @@ Filtered retrieval degrades gracefully:
   ticker-only filter      →  if empty results, fall back to pure ANN
   fallback field records which path was taken so the eval harness can flag it
 
+FILE MAP
+  L001–L030  Module docstring + file map
+  L032–L055  CONFIG — collection name, embedding model, lazy singletons
+  L057–L088  Chroma where= clause builder + result packer
+  L090–L147  retrieve() — single-mode retrieval with fallback logic
+  L149–L172  retrieve_both() — primary entry point, runs both modes
+
 Usage
 -----
     from retrieval.retriever import retrieve_both
@@ -34,10 +41,24 @@ from retrieval.query_parser import parse_query
 
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "financebench_xbrl"
-EMBED_MODEL = "all-MiniLM-L6-v2"
+# ===========================================================================
+# CONFIG
+# ===========================================================================
 
-# Module-level singletons — loaded once on first call, reused across queries.
+# Must match the collection name used in build_index.py.
+COLLECTION_NAME = "financebench_xbrl"      # CHANGE ME if you rename the collection
+
+# Must match the embedding model used to build the index — changing this without
+# rebuilding the index will produce nonsense similarity scores.
+EMBED_MODEL = "all-MiniLM-L6-v2"           # CHANGE ME: try "yiyanghkust/finbert-tone" for ablation
+
+# Default number of chunks returned per query.
+DEFAULT_K = 5                               # TWEAK
+
+# ===========================================================================
+
+# Lazy singletons — loaded once on first call, reused across queries.
+# This avoids reloading the 80MB embedding model on every retrieve() call.
 _model: SentenceTransformer | None = None
 _collection = None
 

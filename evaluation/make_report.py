@@ -6,11 +6,18 @@ Two modes:
   narrative            MD&A-style prose — "For the three months ended December 30, 2023..."
                        No fiscal label in the text. Tests the non-calendar fiscal year problem.
 
+FILE MAP
+  L001–L022  Module docstring + file map
+  L024–L060  Imports + CONFIG (colours, CSS, text truncation)
+  L062–L082  Cell renderers — _colour_cell(), _build_section()
+  L084–L175  make_report() — loads facts, runs taggers, builds HTML, writes file
+  L177–L197  main() — CLI entry point
+
 Usage:
-    python -m evaluation.make_report                        # AAPL xbrl mode
-    python -m evaluation.make_report AAPL --narrative       # AAPL narrative mode
-    python -m evaluation.make_report MSFT GOOG --narrative  # multiple tickers, narrative mode
-    python -m evaluation.make_report AAPL --concepts NetIncomeLoss EarningsPerShareBasic
+    python evaluation/make_report.py                        # AAPL xbrl mode
+    python evaluation/make_report.py AAPL --narrative       # AAPL narrative mode
+    python evaluation/make_report.py MSFT GOOG --narrative  # multiple tickers
+    python evaluation/make_report.py AAPL --concepts NetIncomeLoss EarningsPerShareBasic
 """
 
 from __future__ import annotations
@@ -35,9 +42,19 @@ from evaluation.tagger import regex_tag, similarity_tag_all
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
 
-GREEN = "#c6efce"
-RED   = "#ffc7ce"
-GREY  = "#f2f2f2"
+# ===========================================================================
+# CONFIG
+# ===========================================================================
+
+# Colour palette for correct/incorrect cells — TWEAK to match thesis document
+GREEN = "#c6efce"   # correct prediction
+RED   = "#ffc7ce"   # wrong prediction
+GREY  = "#f2f2f2"   # None prediction (abstained)
+
+# Max characters of chunk text shown per row — TWEAK for readability
+CHUNK_TEXT_TRUNCATE = 120    # TWEAK
+
+# ===========================================================================
 
 CSS = """
 <style>
@@ -97,7 +114,7 @@ def make_report(ticker: str, concepts: list[str], out_path: Path, narrative: boo
     records = []
     for (text, true, stratum), rp, sp in zip(rows, regex_preds, sim_preds):
         records.append({
-            "text":      text[:120],
+            "text":      text[:CHUNK_TEXT_TRUNCATE],
             "true":      true,
             "stratum":   stratum,
             "regex_pred": rp,

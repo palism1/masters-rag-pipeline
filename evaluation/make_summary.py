@@ -11,9 +11,16 @@ The key contrast:
   MSFT — June year-end                         → regex wrong on quarterly prose
   NVDA — January year-end                      → regex wrong on quarterly prose
 
+FILE MAP
+  L001–L024  Module docstring + file map
+  L026–L060  Imports + CONFIG (thresholds, fiscal year end labels, CSS)
+  L062–L067  _acc_cell() — colour-codes an accuracy percentage
+  L069–L125  _build_summary_html() — renders the cross-ticker HTML table
+  L127–L168  main() — runs both modes for each ticker, writes HTML + prints table
+
 Usage:
-    python -m evaluation.make_summary               # all four tickers
-    python -m evaluation.make_summary AAPL GOOG     # subset
+    python evaluation/make_summary.py               # all four tickers
+    python evaluation/make_summary.py AAPL GOOG     # subset
 """
 
 from __future__ import annotations
@@ -33,7 +40,17 @@ from ingestion.xbrl_loader import DEFAULT_CONCEPTS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
 
+# ===========================================================================
+# CONFIG
+# ===========================================================================
+
+# Accuracy thresholds for cell colour-coding in the summary table.
+# TWEAK: lower GOOD_THRESHOLD or raise BAD_THRESHOLD to widen the green/red band.
+GOOD_THRESHOLD = 0.85   # ≥ this → green
+BAD_THRESHOLD  = 0.65   # < this → red
+
 # Fiscal year-end month for each ticker (for the summary table annotation).
+# CHANGE ME: add entries when testing additional tickers.
 FISCAL_YEAR_END: dict[str, str] = {
     "AAPL": "September  (non-calendar)",
     "MSFT": "June       (non-calendar)",
@@ -58,7 +75,7 @@ CSS = """
 """
 
 def _acc_cell(acc: float) -> str:
-    cls = "good" if acc >= 0.85 else ("bad" if acc < 0.65 else "")
+    cls = "good" if acc >= GOOD_THRESHOLD else ("bad" if acc < BAD_THRESHOLD else "")
     return f'<td class="{cls}">{acc:.0%}</td>'
 
 

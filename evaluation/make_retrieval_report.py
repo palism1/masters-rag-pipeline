@@ -14,6 +14,16 @@ Key thesis argument made visible: the error is wrong retrieval, not hallucinatio
 Claude answered faithfully with whatever the retriever gave it. The wrong-period
 chunk is shown explicitly so the reader can see exactly what went wrong.
 
+FILE MAP
+  L001–L030  Module docstring + file map
+  L032–L048  Imports + CONFIG (paths, colours, display limits)
+  L050–L120  CSS styles
+  L122–L148  Score → style/label helpers
+  L150–L170  Chunk summary renderer
+  L172–L215  Row builder — one HTML table row per question
+  L217–L272  make_report() — loads results, computes metrics, writes HTML
+  L274–L285  Entry point — main()
+
 Usage
 -----
     python evaluation/make_retrieval_report.py
@@ -30,14 +40,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-RESULTS_PATH = Path("results/eval_results.json")
-OUT_PATH     = Path("retrieval_failure_report.html")
+# ===========================================================================
+# CONFIG
+# ===========================================================================
 
-GREEN  = "#c6efce"
-RED    = "#ffc7ce"
-YELLOW = "#ffeb9c"
-GREY   = "#f5f5f5"
-BLUE   = "#dce6f1"
+RESULTS_PATH = Path("results/eval_results.json")        # CHANGE ME: input path
+OUT_PATH     = Path("retrieval_failure_report.html")    # CHANGE ME: output path
+
+# Colour palette — TWEAK to match your thesis document colours
+GREEN  = "#c6efce"   # correct answer
+RED    = "#ffc7ce"   # wrong answer
+YELLOW = "#ffeb9c"   # scale mismatch (right value, wrong unit prefix)
+GREY   = "#f5f5f5"   # no answer
+BLUE   = "#dce6f1"   # non-numeric (qualitative answer, cannot auto-score)
+
+# Max chunks shown per cell in the report — more than 3 gets cluttered
+MAX_CHUNKS_SHOWN = 3                                    # TWEAK
+
+# ===========================================================================
 
 CSS = """
 <style>
@@ -85,7 +105,7 @@ def _score_label(score: str) -> str:
     }.get(score, score.upper())
 
 
-def _chunk_summary(mode_result: dict, max_chunks: int = 3) -> str:
+def _chunk_summary(mode_result: dict, max_chunks: int = MAX_CHUNKS_SHOWN) -> str:
     chunks = mode_result.get("retrieval", {}).get("chunks", [])[:max_chunks]
     if not chunks:
         return "<i>no chunks</i>"

@@ -14,9 +14,16 @@ parse_query(), and reports:
 Ground truth is derived from doc_name (e.g. "3M_2023Q2_10Q" → "FY2023-Q2"),
 which is more reliable than the doc_period integer for quarterly questions.
 
+FILE MAP
+  L001–L028  Module docstring + file map
+  L030–L048  Imports + CONFIG
+  L050–L076  Scope classification + doc_name → period parser
+  L078–L095  Ground-truth ticker lookup
+  L097–L256  run_audit() — main evaluation loop and report printing
+
 Usage
 -----
-    python -m scripts.audit_fb_parser
+    python scripts/audit_fb_parser.py
 """
 
 from __future__ import annotations
@@ -24,11 +31,10 @@ from __future__ import annotations
 import os
 import re
 import sys
+from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import sys
-from collections import Counter, defaultdict
 
 os.environ["DRY_RUN"] = "true"
 
