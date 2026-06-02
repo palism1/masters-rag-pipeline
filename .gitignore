@@ -1,6 +1,8 @@
 .env
 edgar_cache/
 chroma_db/
+results/
+findings_report.html
 __pycache__/
 *.pyc
 *.pyo

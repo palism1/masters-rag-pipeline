@@ -32,3 +32,8 @@ CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 # Safety flag: True blocks any code path that would write to a vector store / DB.
 # Flip to False only after dry-run output has been manually verified correct.
 DRY_RUN: bool = os.getenv("DRY_RUN", "true").lower() in ("1", "true", "yes")
+
+# Anthropic API key — only required when running generation (Step 4+).
+# Intentionally not validated at import time so ingestion/retrieval scripts
+# work without it.
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
