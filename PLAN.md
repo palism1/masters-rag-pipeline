@@ -6,59 +6,73 @@ _Last updated: 2026-06-02_
 
 ## Where we are
 
-Stage 1 (period tagger diagnostic) is complete:
+### Stage 1 — Complete
 
 - XBRL ingestion from SEC EDGAR via `edgartools` — clean, deduplicated facts with ground-truth `fy_label` from EDGAR's own `fy`/`fp` fields
 - Two chunking modes: structured XBRL format and MD&A-style narrative prose
-- Two taggers benchmarked: regex baseline vs 1-NN similarity (sentence-transformers / TF-IDF fallback)
-- Cross-ticker HTML comparison reports for AAPL, MSFT, GOOG, NVDA
-- Key result confirmed: regex ~54% on quarterly XBRL chunks (extracts year only from `FY2024-Q1`); similarity ~90%+. Non-calendar fiscal year failure demonstrated on narrative prose.
+- Two taggers benchmarked on real EDGAR data (AAPL, MSFT, GOOG, NVDA):
 
-**What Stage 1 proved:** the tagging problem is diagnostic. The real contribution is retrieval — ensuring that when a question asks about Q1 2024, only Q1 2024 chunks are retrieved.
+| Ticker | Mode | Regex | Similarity (all-MiniLM-L6-v2) |
+|---|---|---|---|
+| AAPL | XBRL | 54% | 44% |
+| GOOG | XBRL | 19% | 41% |
+| MSFT | XBRL | 55% | 42% |
+| NVDA | XBRL | 52% | 55% |
+| AAPL | Narrative | 35% | 41% |
+| GOOG | Narrative | **77%** | 39% |
+| MSFT | Narrative | 27% | 34% |
+| NVDA | Narrative | 23% | 38% |
+
+**Key results:**
+- Regex ~54% on XBRL chunks — extracts year but drops quarter from `FY2024-Q1`
+- Similarity tagger 41–55% on real XBRL — WORSE than on synthetic data. All chunks
+  for the same company are semantically near-identical; the embedding model cannot
+  distinguish between periods even when the label is explicitly in the text
+- GOOG narrative 77% vs AAPL/MSFT/NVDA 23–35% — confirms the non-calendar fiscal
+  year failure exactly as hypothesised
+- **The embedding model's inability to distinguish periods motivates metadata filtering
+  as a correctness mechanism, not just an optimisation**
+
+### Phase 1 Steps 1–3 — Complete
+
+**Step 1 — Index built:** 13,416 documents across 32 FinanceBench companies in Chroma.
+`all-MiniLM-L6-v2` embeddings. Metadata per chunk: `fiscal_period`, `ticker`, `concept`,
+`form_type`, `accession`, `entity`, `cik`, `period_end`, `period_type`.
+
+**Step 2 — Query parser built:** regex + company name lookup → `{"ticker": "PEP", "fiscal_period": "FY2022-Q1"}`.
+Audited against all 150 FinanceBench questions: 99% ticker accuracy, 82% full filter coverage,
+0% pure-ANN fallback. Remaining period misses are multi-period comparison questions
+(first-match limitation) and questions with no period in the text — both are expected behaviour.
+
+**Step 3 — Retriever built:** `retrieve_both()` runs filtered and baseline modes against the
+same index and returns side-by-side results. Smoke test confirmed:
+
+| Question | Filtered top-3 periods | Baseline top-3 periods |
+|---|---|---|
+| PepsiCo net income Q1 2022 | FY2022-Q1, FY2022-Q1, FY2022-Q1 | FY2025-Q2, FY2025-Q2, FY2023-Q2 |
+| 3M revenue Q2 2023 | FY2023-Q2, FY2023-Q2, FY2023-Q2 | FY2025-Q2, FY2020-Q3, FY2025-Q3 |
+| JPMorgan EPS Q3 2022 | FY2022-Q3, FY2022-Q3, FY2022-Q3 | FY2020-Q3, FY2023-Q3, FY2023-Q2 |
+
+**Filtered: 3/3 correct every time. Baseline: wrong every time.**
+The core claim is empirically confirmed at retrieval level before any generation.
 
 ---
 
-## Phase 1 — Period-filtered retrieval on clean XBRL data
-
-_Goal: validate the core retrieval contribution end-to-end_
-
-### Step 1 — Embed and index XBRL chunks
-
-- Run `facts_to_chunks()` for all tickers (AAPL, MSFT, GOOG, NVDA) across all default concepts
-- Embed chunk text with `sentence-transformers/all-MiniLM-L6-v2`
-- Store in **Chroma** (local, zero-infra) with the following metadata fields per chunk:
-  - `fiscal_period` — e.g. `"FY2024-Q1"` (from `fy_label`)
-  - `ticker` — e.g. `"AAPL"`
-  - `concept` — e.g. `"NetIncomeLoss"`
-  - `form_type` — `"10-K"` or `"10-Q"`
-  - `accession` — SEC accession number (for citation)
-
-### Step 2 — Regex period extractor (query → filter)
-
-- Takes a natural-language question: _"What was Apple's net income in Q1 2024?"_
-- Returns a structured filter dict: `{"ticker": "AAPL", "fiscal_period": "FY2024-Q1"}`
-- Regex-only, consistent with Stage 1 philosophy — no LLM call in the retrieval path
-- Handles the same surface forms the tagger already covers: `Q1 2024`, `FY2024-Q1`, `first quarter 2024`, `fiscal year 2023`, etc.
-- Falls back to `ticker`-only filter if no period is extractable
-
-### Step 3 — Period-aware retriever
-
-- Pre-filter the Chroma collection by `fiscal_period` + `ticker` before ANN search
-- Run ANN search within the filtered subset
-- Return top-k chunks with metadata
-- **Baseline for comparison:** same ANN search with no metadata filter
+## Phase 1 — Remaining steps
 
 ### Step 4 — Generation with Claude
 
-- Pass retrieved chunks to Claude as context
-- Structured prompt: answer the question, cite the source accession number, state the fiscal period explicitly
-- Return structured response: answer, evidence chunks, period label used
+- `retrieval/generator.py`: takes `retrieve_both()` output, formats retrieved chunks as
+  context, calls Claude, returns structured answer
+- Two answers per question: one from filtered chunks, one from baseline chunks
+- Structured prompt: answer the question, state the fiscal period explicitly, cite the
+  accession number
+- Add `anthropic` to `requirements.txt`
 
 ### Step 5 — Evaluation against FinanceBench
 
-- FinanceBench: 10,231 expert QA pairs from real SEC filings (10-K, 10-Q)
-- Map the subset of FinanceBench questions covering AAPL, MSFT, GOOG, NVDA to the pipeline
-- Evaluate with **RAGAS** metrics: faithfulness, answer relevancy, context recall
+- FinanceBench public split (150 questions, 127 in XBRL scope after removing 8-K/Earnings)
+- Evaluate with **RAGAS** metrics: context recall, answer accuracy
 - Comparison table:
   | Approach | Context recall | Answer accuracy |
   |---|---|---|
@@ -66,11 +80,20 @@ _Goal: validate the core retrieval contribution end-to-end_
   | Period-filtered retrieval | ? | ? |
   | Period-filtered + Claude generation | ? | ? |
 
+- **Retrieval failure report** (`evaluation/make_retrieval_report.py`): HTML table for
+  every question where filtered and baseline disagree — shows question, ground truth,
+  chunks retrieved by each approach (with `fiscal_period` metadata visible), both
+  generated answers colour-coded correct/incorrect. Same structure as Stage 1
+  `make_report.py`. Key argument: the error is wrong retrieval, not hallucination.
+- **Coverage check completed:** FinanceBench spans FY2015–FY2024, all covered by
+  EDGAR XBRL history
+
 ---
 
 ## Phase 2 — Structure-aware HTML parsing (the implicit tier)
 
-_Goal: solve the cases where the fiscal period is NOT in the chunk text — it lives in a section heading or table column header above the chunk_
+_Goal: solve the cases where the fiscal period is NOT in the chunk text — it lives in a
+section heading or table column header above the chunk_
 
 ### Step 6 — Document fetcher and structure parser
 
@@ -83,9 +106,12 @@ _Goal: solve the cases where the fiscal period is NOT in the chunk text — it l
 ### Step 7 — Structure-aware chunker with period propagation
 
 - Walk the semantic tree and propagate the period label **down**:
-  - Section heading `"Three Months Ended March 31, 2024"` → inject `fiscal_period=FY2024-Q1` into every paragraph chunk beneath it
-  - Table column header `"Q1 2024 | Q2 2024"` → each data row becomes two chunks, one per period, with the correct `fiscal_period` tag
-- This creates chunks for the **implicit tier** — chunks whose text alone contains no fiscal label, but whose metadata carries the correct one from document structure
+  - Section heading `"Three Months Ended March 31, 2024"` → inject `fiscal_period=FY2024-Q1`
+    into every paragraph chunk beneath it
+  - Table column header `"Q1 2024 | Q2 2024"` → each data row becomes two chunks, one per
+    period, with the correct `fiscal_period` tag
+- This creates chunks for the **implicit tier** — chunks whose text alone contains no fiscal
+  label, but whose metadata carries the correct one from document structure
 
 ### Step 8 — Mixed index
 
@@ -110,17 +136,18 @@ This becomes the core evaluation table in the thesis.
 
 | Decision | Choice | Reason |
 |---|---|---|
-| Vector store | Chroma | Zero infra, pure Python, fine at thesis scale. Swap to Qdrant if filter efficiency needs to be a thesis argument. |
-| Embedding model | `all-MiniLM-L6-v2` | Already in stack. Finance-specific model (e.g. FinBERT) is a potential ablation. |
-| Period extractor | Regex only | Consistent with Stage 1 philosophy; keeps the retrieval path fast and interpretable. |
-| Evaluation benchmark | FinanceBench | Positions work against published baselines (naive RAG ~19%, full-context GPT-4 ~78%). |
-| Generation model | Claude | Via Anthropic API. Structured prompt with source citation. |
-| HTML parser | TBD: `sec-parser` vs `edgartools.filing.markdown()` | Evaluate in Step 6. |
+| Vector store | Chroma | Zero infra, pure Python, fine at thesis scale |
+| Embedding model | `all-MiniLM-L6-v2` | Stage 1 confirmed it cannot distinguish periods — motivates metadata filter. FinBERT ablation remains a future option |
+| Period extractor | Regex only | Consistent with Stage 1 philosophy; keeps the retrieval path fast and interpretable |
+| Evaluation benchmark | FinanceBench (127 in-scope) | Positions work against published baselines (naive RAG ~19%, full-context GPT-4 ~78%) |
+| Generation model | Claude | Via Anthropic API. Structured prompt with source citation |
+| HTML parser | TBD: `sec-parser` vs `edgartools.filing.markdown()` | Evaluate in Step 6 |
 
 ---
 
 ## Open questions
 
-- Which FinanceBench questions map cleanly to the four tickers already in the pipeline?
-- Does `edgartools.filing.markdown()` preserve table column headers, or does `sec-parser` need to be added as a dependency?
+- Does `edgartools.filing.markdown()` preserve table column headers, or does `sec-parser`
+  need to be added as a dependency?
 - Should the period extractor handle multi-period questions ("compare Q1 2024 vs Q1 2023")?
+  Currently takes the first match — affects 18/127 FinanceBench questions.

@@ -19,13 +19,15 @@ import logging
 import os
 import sys
 from collections import defaultdict
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ["DRY_RUN"] = "true"
 
 import config  # noqa: E402
 from ingestion.xbrl_loader import DEFAULT_CONCEPTS, load_company_facts
 from ingestion.xbrl_chunker import facts_to_chunks
-from .tagger import regex_tag, similarity_tag_all
+from evaluation.tagger import regex_tag, similarity_tag_all
 
 logging.basicConfig(
     level=logging.INFO,

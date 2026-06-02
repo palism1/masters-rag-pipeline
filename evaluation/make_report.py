@@ -21,6 +21,7 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ["DRY_RUN"] = "true"
 
 import pandas as pd
@@ -29,8 +30,8 @@ import config  # noqa: E402
 from ingestion.xbrl_loader import DEFAULT_CONCEPTS, load_company_facts
 from ingestion.xbrl_chunker import facts_to_chunks
 from ingestion.narrative_chunker import facts_to_narrative_chunks
-from .xbrl_eval import chunks_to_rows
-from .tagger import regex_tag, similarity_tag_all
+from evaluation.xbrl_eval import chunks_to_rows
+from evaluation.tagger import regex_tag, similarity_tag_all
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
 

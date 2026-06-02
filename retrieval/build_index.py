@@ -19,12 +19,16 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import chromadb
 from sentence_transformers import SentenceTransformer
 
 import config
-from .financebench_tickers import (
+from retrieval.financebench_tickers import (
     FINANCEBENCH_COMPANIES,
     FBCompany,
     HAS_10Q,
@@ -99,15 +103,31 @@ def build(companies: list[FBCompany], dry_run: bool) -> None:
             logger.info("%-12s | 0 chunks — nothing to index", ticker_label)
             continue
 
-        ids       = [_doc_id(c) for c in chunks]
-        texts     = [c["text"] for c in chunks]
-        metadatas = [_safe_metadata(c, ticker_label) for c in chunks]
+        # Deduplicate by doc_id before embedding — EDGAR sometimes reports the same
+        # (concept, period, unit) with two different values (original + restatement).
+        # Both survive xbrl_loader._dedup (different values = different dedup keys)
+        # but map to the same doc_id. Keep the first occurrence, which comes from
+        # the most authoritative form_type already selected by _dedup.
+        seen: dict[str, dict] = {}
+        for c in chunks:
+            did = _doc_id(c)
+            if did not in seen:
+                seen[did] = c
+
+        deduped   = list(seen.values())
+        ids       = list(seen.keys())
+        texts     = [c["text"] for c in deduped]
+        metadatas = [_safe_metadata(c, ticker_label) for c in deduped]
         embeddings = model.encode(texts, show_progress_bar=False).tolist()
+
+        dropped = len(chunks) - len(deduped)
+        if dropped:
+            logger.debug("%-12s | %d duplicate doc_ids dropped", ticker_label, dropped)
 
         if not dry_run:
             collection.upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
 
-        logger.info("%-12s | %d chunks %s", ticker_label, len(chunks),
+        logger.info("%-12s | %d chunks %s", ticker_label, len(deduped),
                     "embedded (dry_run — not written)" if dry_run else "upserted")
         total += len(chunks)
 

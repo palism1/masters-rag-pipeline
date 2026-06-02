@@ -24,10 +24,11 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ["DRY_RUN"] = "true"
 
 import config  # noqa: E402
-from .make_report import make_report
+from evaluation.make_report import make_report
 from ingestion.xbrl_loader import DEFAULT_CONCEPTS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s", datefmt="%H:%M:%S")

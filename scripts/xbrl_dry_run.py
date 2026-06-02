@@ -19,6 +19,9 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Force DRY_RUN before config loads so the import-time check sees it.
 os.environ["DRY_RUN"] = "true"
