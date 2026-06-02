@@ -1,0 +1,6 @@
+edgartools>=2.7
+python-dotenv>=1.0
+pandas>=2.0
+pytest>=8.0
+scikit-learn>=1.3
+sentence-transformers>=3.0
