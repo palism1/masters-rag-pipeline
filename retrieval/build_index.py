@@ -41,8 +41,8 @@ from ingestion.xbrl_loader import load_company_facts
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "financebench_xbrl"
-EMBED_MODEL = "all-MiniLM-L6-v2"
+COLLECTION_NAME = config.COLLECTION_NAME
+EMBED_MODEL     = config.EMBED_MODEL
 
 # Stage 1 tickers are not in FinanceBench but are useful for smoke-testing the
 # pipeline. CIKs are their SEC-registered identifiers.

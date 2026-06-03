@@ -37,3 +37,9 @@ DRY_RUN: bool = os.getenv("DRY_RUN", "true").lower() in ("1", "true", "yes")
 # Intentionally not validated at import time so ingestion/retrieval scripts
 # work without it.
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+
+# Vector store and embedding model — single source of truth used by both
+# build_index.py and retriever.py. Change here when running ablations so
+# the index and retriever always stay in sync.
+COLLECTION_NAME: str = "financebench_xbrl"
+EMBED_MODEL: str = "all-MiniLM-L6-v2"

@@ -40,6 +40,22 @@ def _prose_date(iso_date: str) -> str:
     return f"{_MONTH_NAMES[d.month]} {d.day}, {d.year}"
 
 
+def _duration_months(start_iso: str, end_iso: str) -> int:
+    s = _date.fromisoformat(start_iso)
+    e = _date.fromisoformat(end_iso)
+    return (e.year - s.year) * 12 + (e.month - s.month)
+
+
+def _months_phrase(months: int) -> str:
+    if months <= 4:
+        return "three months"
+    if months <= 7:
+        return "six months"
+    if months <= 10:
+        return "nine months"
+    return "twelve months"
+
+
 def _prose_concept(concept: str) -> str:
     return _CONCEPT_TO_PROSE.get(concept, concept.lower())
 
@@ -70,8 +86,12 @@ def facts_to_narrative_chunks(facts: list[XbrlFact]) -> list[dict]:
                 f"{entity} reported {concept} of {value}."
             )
         else:
+            if f.period_start:
+                duration = _months_phrase(_duration_months(f.period_start, f.period_end))
+            else:
+                duration = "three months"
             text = (
-                f"For the three months ended {end}, "
+                f"For the {duration} ended {end}, "
                 f"{entity} reported {concept} of {value}."
             )
 

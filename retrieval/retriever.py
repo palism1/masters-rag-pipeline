@@ -39,18 +39,14 @@ from sentence_transformers import SentenceTransformer
 import config
 from retrieval.query_parser import parse_query
 
+COLLECTION_NAME = config.COLLECTION_NAME
+EMBED_MODEL     = config.EMBED_MODEL
+
 logger = logging.getLogger(__name__)
 
 # ===========================================================================
 # CONFIG
 # ===========================================================================
-
-# Must match the collection name used in build_index.py.
-COLLECTION_NAME = "financebench_xbrl"      # CHANGE ME if you rename the collection
-
-# Must match the embedding model used to build the index — changing this without
-# rebuilding the index will produce nonsense similarity scores.
-EMBED_MODEL = "all-MiniLM-L6-v2"           # CHANGE ME: try "yiyanghkust/finbert-tone" for ablation
 
 # Default number of chunks returned per query.
 DEFAULT_K = 5                               # TWEAK
@@ -88,10 +84,8 @@ def _build_where(filter_dict: dict) -> dict | None:
     """
     if not filter_dict:
         return None
-    if len(filter_dict) == 1:
-        key, val = next(iter(filter_dict.items()))
-        return {key: val}
-    return {"$and": [{k: {"$eq": v}} for k, v in filter_dict.items()]}
+    items = [{k: {"$eq": v}} for k, v in filter_dict.items()]
+    return items[0] if len(items) == 1 else {"$and": items}
 
 
 def _pack_results(results: dict) -> list[dict]:
@@ -115,7 +109,7 @@ def _query(embedding: list[float], k: int, where: dict | None) -> list[dict]:
     try:
         return _pack_results(collection.query(**kwargs))
     except Exception as exc:
-        logger.warning("Chroma query failed: %s", exc)
+        logger.error("Chroma query failed: %s", exc, exc_info=True)
         return []
 
 

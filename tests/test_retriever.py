@@ -32,7 +32,7 @@ def test_build_where_empty():
 
 
 def test_build_where_single_key():
-    assert _build_where({"ticker": "AAPL"}) == {"ticker": "AAPL"}
+    assert _build_where({"ticker": "AAPL"}) == {"ticker": {"$eq": "AAPL"}}
 
 
 def test_build_where_two_keys():

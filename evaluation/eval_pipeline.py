@@ -45,7 +45,6 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-os.environ.setdefault("DRY_RUN", "false")
 
 from datasets import load_dataset
 
@@ -114,7 +113,7 @@ def _extract_number(text: str) -> float | None:
     clean = re.sub(r"[$,]", "", text.lower())
 
     # Try suffix form first — "1.577 billion", "$1.577B", "34.2M", etc.
-    m = re.search(r"(-?\d+\.?\d*)\s*(billion|million|thousand|[bmkt])\b", clean)
+    m = re.search(r"(-?\d+\.?\d*)\s*(billion|million|trillion|thousand|[bmkt])\b", clean)
     if m:
         val    = float(m.group(1))
         suffix = m.group(2)[0]    # first char captures b/m/k/t from word or letter
@@ -330,6 +329,7 @@ def print_metrics(results: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    os.environ.setdefault("DRY_RUN", "false")
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--limit", type=int, default=None,

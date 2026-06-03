@@ -189,7 +189,11 @@ def load_company_facts(
         if not ff.period_end:
             continue
 
-        numeric_val = ff.numeric_value if ff.numeric_value is not None else float(ff.value)
+        try:
+            numeric_val = ff.numeric_value if ff.numeric_value is not None else float(ff.value)
+        except (ValueError, TypeError):
+            logger.debug("Skipping non-numeric fact: concept=%s value=%r", plain_concept, ff.value)
+            continue
 
         candidates.append(
             XbrlFact(
