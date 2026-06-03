@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ["DRY_RUN"] = "true"
 
 import config  # noqa: E402
-from evaluation.make_report import make_report
+from evaluation.make_report import make_combined_report
 from ingestion.xbrl_loader import DEFAULT_CONCEPTS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
@@ -84,7 +84,7 @@ def _build_summary_html(results: list[dict], backend: str) -> str:
     for r in results:
         mode_label = "Narrative prose" if r["mode"] == "narrative" else "XBRL format"
         fy_end     = FISCAL_YEAR_END.get(r["ticker"], "unknown")
-        link       = f'report_{r["ticker"]}{"_narrative" if r["mode"] == "narrative" else ""}.html'
+        link       = f'report_{r["ticker"]}.html'
         rows.append(
             f'<tr><td><a href="{link}">{r["ticker"]}</a></td>'
             f'<td>{fy_end}</td>'
@@ -150,18 +150,15 @@ def main(argv=None):
     backend  = "TF-IDF fallback"
 
     for ticker in args.tickers:
-        for narrative in [False, True]:
-            mode   = "narrative" if narrative else "xbrl"
-            suffix = "_narrative" if narrative else ""
-            out    = Path(f"report_{ticker}{suffix}.html")
-            logging.info("--- %s / %s ---", ticker, mode)
-            try:
-                r = make_report(ticker, concepts, out, narrative=narrative)
-                if r:
-                    results.append(r)
-                    backend = r["backend"].split("(")[0].strip()
-            except Exception as exc:
-                logging.error("Failed %s/%s: %s", ticker, mode, exc)
+        out = Path(f"report_{ticker}.html")
+        logging.info("--- %s ---", ticker)
+        try:
+            ticker_results = make_combined_report(ticker, concepts, out)
+            for r in ticker_results:
+                results.append(r)
+                backend = r["backend"].split("(")[0].strip()
+        except Exception as exc:
+            logging.error("Failed %s: %s", ticker, exc)
 
     if not results:
         print("No results produced.", file=sys.stderr)

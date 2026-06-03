@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Optional
 
 import edgar
@@ -106,6 +107,76 @@ def _configure_edgar() -> None:
     logger.debug("edgartools identity set: %s", config.SEC_USER_AGENT)
 
 
+
+
+_FY_DRIFT = timedelta(days=14)  # 52/53-week calendars can shift the year-start by ~6 days
+
+
+def _build_fy_bounds(facts: list[XbrlFact]) -> dict[tuple[str, int], tuple[str, str]]:
+    """
+    Return {(cik, fiscal_year): (fy_start, fy_end)} from trusted annual facts.
+
+    Two guards:
+    1. period_end.year must equal fiscal_year — rejects mislabeled annual
+       comparatives (FY2007 period tagged fy=2009 because it appeared in the
+       FY2009 10-K alongside the current-year data).
+    2. Period must span ≥300 days — rejects early EDGAR filings where quarterly
+       periods were incorrectly tagged fp="FY", which would corrupt the calendar
+       and cause valid quarterly facts to be filtered out downstream.
+    """
+    bounds: dict[tuple[str, int], tuple[str, str]] = {}
+    for f in facts:
+        if f.fiscal_period != "FY" or not f.fiscal_year or not f.period_start:
+            continue
+        if int(f.period_end[:4]) != f.fiscal_year:
+            continue
+        duration = (date.fromisoformat(f.period_end) - date.fromisoformat(f.period_start)).days
+        if duration < 300:
+            continue  # not a real annual period (fp="FY" on a quarterly fact)
+        key = (f.cik, f.fiscal_year)
+        if key not in bounds:
+            bounds[key] = (f.period_start, f.period_end)
+    return bounds
+
+
+def _filter_comparative(facts: list[XbrlFact]) -> list[XbrlFact]:
+    """
+    Drop comparative-period facts mislabeled with the filing's fiscal year.
+
+    EDGAR tags every fact in a filing with the filing's fy/fp — including the
+    prior-year comparison column required by SEC rules. We validate each duration
+    fact against the fiscal year boundaries derived from trusted annual facts.
+
+    The 14-day start tolerance handles 52/53-week fiscal calendars where the
+    year-start shifts slightly (e.g. NVDA's late-January year-end drifts a week).
+    Falls back to a year-heuristic when no annual bounds exist for that year.
+    Instant facts (no period_start) are always kept.
+    """
+    fy_bounds = _build_fy_bounds(facts)
+    kept: list[XbrlFact] = []
+    dropped = 0
+    for f in facts:
+        if f.period_type != "duration" or not f.period_start or not f.fiscal_year:
+            kept.append(f)
+            continue
+        key = (f.cik, f.fiscal_year)
+        if key in fy_bounds:
+            fy_start, fy_end = fy_bounds[key]
+            start_ok = date.fromisoformat(f.period_start) >= date.fromisoformat(fy_start) - _FY_DRIFT
+            end_ok   = f.period_end <= fy_end
+            if start_ok and end_ok:
+                kept.append(f)
+            else:
+                dropped += 1
+        else:
+            # No trusted annual fact for this year — fall back to year heuristic
+            if int(f.period_start[:4]) >= f.fiscal_year - 1:
+                kept.append(f)
+            else:
+                dropped += 1
+    if dropped:
+        logger.debug("Dropped %d comparative-period facts (period outside fiscal year bounds)", dropped)
+    return kept
 
 
 def _dedup(candidates: list[XbrlFact]) -> list[XbrlFact]:
@@ -211,6 +282,7 @@ def load_company_facts(
         )
 
     facts = _dedup(candidates)
+    facts = _filter_comparative(facts)
 
     if config.DRY_RUN:
         logger.info(

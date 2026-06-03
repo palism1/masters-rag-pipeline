@@ -99,113 +99,156 @@ def _build_section(df_section, title, note=""):
     )
 
 
-def make_report(ticker: str, concepts: list[str], out_path: Path, narrative: bool = False) -> None:
-    facts  = load_company_facts(ticker, concepts=concepts)
+def _run_mode(facts, narrative: bool) -> tuple[pd.DataFrame, str]:
+    """Chunk facts, tag, and return (records_df, backend_name)."""
     chunks = facts_to_narrative_chunks(facts) if narrative else facts_to_chunks(facts)
     rows   = chunks_to_rows(chunks)
-
     if not rows:
-        logging.warning("%s: no labeled rows — skipping report", ticker)
-        return
+        return pd.DataFrame(), "none"
 
-    regex_preds          = [regex_tag(r[0]) for r in rows]
-    sim_preds, backend   = similarity_tag_all(rows)
+    regex_preds        = [regex_tag(r[0]) for r in rows]
+    sim_preds, backend = similarity_tag_all(rows)
 
     records = []
     for (text, true, stratum), rp, sp in zip(rows, regex_preds, sim_preds):
         records.append({
-            "text":      text[:CHUNK_TEXT_TRUNCATE],
-            "true":      true,
-            "stratum":   stratum,
+            "text":       text[:CHUNK_TEXT_TRUNCATE],
+            "true":       true,
+            "stratum":    stratum,
             "regex_pred": rp,
             "sim_pred":   sp,
-            "regex_ok":  rp == true,
-            "sim_ok":    sp == true,
+            "regex_ok":   rp == true,
+            "sim_ok":     sp == true,
         })
-    df = pd.DataFrame(records)
+    return pd.DataFrame(records), backend
+
+
+def _mode_html(df: pd.DataFrame, backend: str, ticker: str, narrative: bool) -> tuple[str, dict]:
+    """Build the HTML block and metrics dict for one mode (xbrl or narrative)."""
+    if df.empty:
+        return f"<p><i>No labeled chunks for {'narrative' if narrative else 'xbrl'} mode.</i></p>", {}
 
     n          = len(df)
     regex_acc  = df["regex_ok"].mean()
     sim_acc    = df["sim_ok"].mean()
+
+    summary_html = f"""
+<div class="summary-box">
+  <div class="metric"><span>{regex_acc:.0%}</span>Regex accuracy</div>
+  <div class="metric"><span>{sim_acc:.0%}</span>Similarity ({backend.split("(")[0].strip()})</div>
+  <div class="metric"><span>{n}</span>Labeled chunks</div>
+</div>
+"""
+    mode_note = (
+        "<p><b>Narrative mode:</b> chunk text uses calendar-date phrasing only — "
+        "<i>\"For the three months ended December 30, 2023...\"</i> — with no FY label. "
+        "Regex maps December&nbsp;&rarr;&nbsp;Q4 (calendar year assumption); Apple's fiscal Q1 "
+        "ends in December, so regex predicts the wrong quarter. "
+        "This is the non-calendar fiscal year failure.</p>"
+    ) if narrative else ""
 
     df_rx_wrong_sim_right = df[ ~df["regex_ok"] &  df["sim_ok"]]
     df_both_wrong         = df[ ~df["regex_ok"] & ~df["sim_ok"]]
     df_rx_right_sim_wrong = df[  df["regex_ok"] & ~df["sim_ok"]]
     df_both_right         = df[  df["regex_ok"] &  df["sim_ok"]]
 
-    summary_html = f"""
-<div class="summary-box">
-  <div class="metric"><span>{regex_acc:.0%}</span>Regex accuracy</div>
-  <div class="metric"><span>{sim_acc:.0%}</span>Similarity accuracy ({backend.split("(")[0].strip()})</div>
-  <div class="metric"><span>{n}</span>Labeled chunks</div>
-</div>
-"""
-
     sections = "".join([
-        _build_section(
-            df_rx_wrong_sim_right,
+        _build_section(df_rx_wrong_sim_right,
             f"Regex wrong, similarity right ({len(df_rx_wrong_sim_right)} rows)",
-            "These are the cases that motivate the learned approach. "
-            "Regex extracted the year but dropped the quarter; similarity matched the full label.",
-        ),
-        _build_section(
-            df_both_wrong,
+            "Regex extracted the year but dropped the quarter; similarity matched the full label."),
+        _build_section(df_both_wrong,
             f"Both wrong ({len(df_both_wrong)} rows)",
-            "Edge cases where neither tagger recovers the correct label.",
-        ),
-        _build_section(
-            df_rx_right_sim_wrong,
+            "Edge cases where neither tagger recovers the correct label."),
+        _build_section(df_rx_right_sim_wrong,
             f"Regex right, similarity wrong ({len(df_rx_right_sim_wrong)} rows)",
-            "Cases where the regex pattern fired correctly but the nearest neighbour was misleading.",
-        ),
-        _build_section(
-            df_both_right,
-            f"Both correct ({len(df_both_right)} rows) — sample (first 20)",
-            "Annual facts where 'FY2024' in the text is unambiguous for both approaches.",
-        ) if not df_both_right.empty else "",
+            "Regex fired correctly but the nearest neighbour was misleading."),
+        _build_section(df_both_right,
+            f"Both correct ({len(df_both_right)} rows)",
+            "Facts where both taggers agree on the correct label.") if not df_both_right.empty else "",
     ])
 
-    mode_label = "narrative prose (no fiscal label in text)" if narrative else "XBRL-format chunks (fiscal label embedded)"
-    mode_note  = (
-        "<p><b>Narrative mode:</b> chunk text uses calendar-date phrasing only — "
-        "<i>\"For the three months ended December 30, 2023...\"</i> — with no FY label. "
-        "Regex maps December&nbsp;→&nbsp;Q4 (calendar year); Apple's fiscal Q1 ends in December, "
-        "so regex predicts the wrong quarter for every quarterly Apple fact. "
-        "This is the non-calendar fiscal year failure.</p>"
-    ) if narrative else ""
+    html = mode_note + summary_html + sections
+    metrics = {"ticker": ticker, "mode": "narrative" if narrative else "xbrl",
+               "n": n, "regex_acc": regex_acc, "sim_acc": sim_acc, "backend": backend}
+    return html, metrics
+
+
+def make_combined_report(ticker: str, concepts: list[str], out_path: Path) -> list[dict]:
+    """
+    Build a single HTML file with XBRL and narrative sections side by side.
+    Returns a list of two metric dicts (xbrl, narrative) for the summary table.
+    """
+    facts = load_company_facts(ticker, concepts=concepts)
+
+    xbrl_df,      xbrl_be  = _run_mode(facts, narrative=False)
+    narrative_df, narr_be  = _run_mode(facts, narrative=True)
+
+    backend = xbrl_be if xbrl_be != "none" else narr_be
+
+    xbrl_html,      xbrl_metrics = _mode_html(xbrl_df,      xbrl_be,  ticker, narrative=False)
+    narrative_html, narr_metrics = _mode_html(narrative_df, narr_be,  ticker, narrative=True)
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Period-tagger report — {ticker} ({("narrative" if narrative else "xbrl")})</title>{CSS}</head>
+<head><meta charset="utf-8"><title>Period-tagger report — {ticker}</title>{CSS}</head>
 <body>
 <h1>Period-tagger comparison — {ticker}</h1>
-<p>Mode: {mode_label} · Ground-truth from EDGAR fy/fp fields · {len(concepts)} concepts</p>
-{mode_note}
-{summary_html}
-{sections}
+<p>Ground-truth labels from SEC EDGAR fy/fp fields &middot; {len(concepts)} concepts
+   &middot; Comparative-period facts filtered (period_start &ge; fiscal_year&minus;1)</p>
+
+<h2>XBRL format &mdash; fiscal label embedded in chunk text</h2>
+{xbrl_html}
+
+<hr style="margin:40px 0;border:none;border-top:2px solid #ccc;">
+
+<h2>Narrative prose &mdash; no fiscal label in text</h2>
+{narrative_html}
 </body>
 </html>"""
 
     out_path.write_text(html, encoding="utf-8")
-    logging.info("Report written → %s", out_path)
-    return {"ticker": ticker, "mode": "narrative" if narrative else "xbrl",
-            "n": n, "regex_acc": regex_acc, "sim_acc": sim_acc, "backend": backend}
+    logging.info("Combined report written -> %s", out_path)
+    return [m for m in [xbrl_metrics, narr_metrics] if m]
+
+
+def make_report(ticker: str, concepts: list[str], out_path: Path, narrative: bool = False) -> dict | None:
+    """Single-mode report (kept for backward compatibility / standalone use)."""
+    facts = load_company_facts(ticker, concepts=concepts)
+    df, backend = _run_mode(facts, narrative=narrative)
+    body, metrics = _mode_html(df, backend, ticker, narrative)
+
+    mode_label = "narrative prose (no fiscal label in text)" if narrative else "XBRL-format chunks (fiscal label embedded)"
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Period-tagger report — {ticker} ({'narrative' if narrative else 'xbrl'})</title>{CSS}</head>
+<body>
+<h1>Period-tagger comparison — {ticker}</h1>
+<p>Mode: {mode_label} · Ground-truth from EDGAR fy/fp fields · {len(concepts)} concepts</p>
+{body}
+</body>
+</html>"""
+    out_path.write_text(html, encoding="utf-8")
+    logging.info("Report written -> %s", out_path)
+    return metrics or None
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Generate HTML comparison report")
     parser.add_argument("tickers", nargs="*", default=["AAPL"])
     parser.add_argument("--concepts", nargs="+", default=None)
+    parser.add_argument("--combined", action="store_true", default=True,
+                        help="Single HTML with both XBRL and narrative sections (default)")
     parser.add_argument("--narrative", action="store_true",
-                        help="Use MD&A-style prose (no fiscal label in text)")
+                        help="Single-mode narrative report only")
     args = parser.parse_args(argv)
 
     concepts = args.concepts or DEFAULT_CONCEPTS
-    suffix   = "_narrative" if args.narrative else ""
     for ticker in args.tickers:
-        out = Path(f"report_{ticker}{suffix}.html")
         try:
-            make_report(ticker, concepts, out, narrative=args.narrative)
+            if args.narrative:
+                make_report(ticker, concepts, Path(f"report_{ticker}_narrative.html"), narrative=True)
+            else:
+                make_combined_report(ticker, concepts, Path(f"report_{ticker}.html"))
         except Exception as exc:
             logging.error("Failed for %s: %s", ticker, exc)
 
