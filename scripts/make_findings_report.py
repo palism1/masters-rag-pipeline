@@ -208,7 +208,7 @@ embedded in text) and narrative prose chunks (calendar-date phrasing only, no la
 def build_index_section() -> str:
     print("  Querying Chroma index stats...")
     client  = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
-    col     = client.get_collection("financebench_xbrl")
+    col     = client.get_collection(config.COLLECTION_NAME)
     total   = col.count()
 
     sample  = col.get(limit=1000, include=["metadatas"])
@@ -348,9 +348,112 @@ the error is in retrieval, not the model. Claude answers faithfully using whatev
 """
 
 
+def build_code_quality_section() -> str:
+    fixes = [
+        (
+            "ingestion/xbrl_loader.py:192",
+            "Non-numeric EDGAR facts crash the whole ticker load",
+            "<code>float(ff.value)</code> raised <code>ValueError</code> on non-numeric strings "
+            "(segment labels, <code>\"N/A\"</code>) — aborting every fact for that company rather "
+            "than skipping just the bad one.",
+            "Wrap in <code>try/except (ValueError, TypeError)</code> — skip the fact and log at DEBUG.",
+        ),
+        (
+            "retrieval/retriever.py:117",
+            "Chroma query errors indistinguishable from empty results",
+            "Bare <code>except</code> silently returned <code>[]</code> for any error (bad filter "
+            "syntax, connection failure). The fallback chain then ran all three levels "
+            "(filtered → ticker-only → pure ANN) with no visible error in metrics.",
+            "Downgraded to <code>logger.error(..., exc_info=True)</code> so the traceback surfaces "
+            "in logs without changing fallback behaviour.",
+        ),
+        (
+            "config.py / build_index.py / retriever.py",
+            "Duplicate COLLECTION_NAME and EMBED_MODEL — ablation silently produces garbage",
+            "Both constants were defined independently in <code>build_index.py</code> and "
+            "<code>retriever.py</code>. Changing <code>EMBED_MODEL</code> in one file for a "
+            "FinBERT ablation without updating the other would build the index with one model "
+            "but query it with another — producing meaningless cosine scores with zero warning.",
+            "Both constants moved to <code>config.py</code> as the single source of truth. "
+            "Both retrieval files now import from there.",
+        ),
+        (
+            "ingestion/narrative_chunker.py:74",
+            "YTD cumulative facts labelled as \"three months\" in narrative mode",
+            "EDGAR includes both 3-month quarterly facts <em>and</em> 6-month/9-month YTD "
+            "cumulative facts in 10-Qs (both with the same <code>fiscal_period</code> tag). "
+            "The else-branch hardcoded <em>\"For the three months ended...\"</em> for all of them "
+            "— factually wrong for the YTD facts, misleading for both tagger evaluation and thesis analysis.",
+            "Compute the actual span from <code>period_start</code>/<code>period_end</code> (already "
+            "on <code>XbrlFact</code>) and map to \"three\", \"six\", \"nine\", or \"twelve months\".",
+        ),
+        (
+            "evaluation/eval_pipeline.py:117",
+            "_extract_number misses \"trillion\" as a word — silently scores trillion-scale answers wrong",
+            "Regex alternation was <code>billion|million|thousand</code> — no \"trillion\". "
+            "A value expressed as \"2.5 trillion\" fell through to the plain-number fallback "
+            "and returned 2.5 instead of 2.5×10¹². The <code>scale_mismatch</code> safety net "
+            "only checked ×10³/10⁶/10⁹, so the answer was marked <em>wrong</em> instead of "
+            "<em>scale_mismatch</em>.",
+            "Added \"trillion\" to the word alternation. "
+            "First char of \"trillion\" is \"t\" which maps to 10¹² in <code>_SUFFIX_MULT</code>.",
+        ),
+        (
+            "retrieval/retriever.py:91",
+            "_build_where single-key path used bare {key: val} instead of $eq operator",
+            "Single-key branch returned <code>{key: val}</code> while the two-key branch used "
+            "<code>{\"\\$eq\": val}</code>. A future ChromaDB version that requires the operator "
+            "form for all conditions would break only the single-key path — silently, because "
+            "<code>_query</code>'s exception handler would catch it and fall back to pure ANN.",
+            "Unified both paths: <code>[{k: {\"\\$eq\": v}} for k, v in filter_dict.items()]</code>, "
+            "return the single item directly for one condition or wrap in <code>\\$and</code> for two.",
+        ),
+        (
+            "evaluation/eval_pipeline.py:48",
+            "os.environ.setdefault(\"DRY_RUN\", \"false\") fired at module import time",
+            "Importing <code>eval_pipeline</code> in a notebook or script without pre-setting "
+            "<code>DRY_RUN</code> silently armed write mode for the entire session. The guard "
+            "in <code>config.py</code> defaults to <em>dry-run</em>, but this import overrode it. "
+            "Tests were safe only because they pre-set the env var before importing — a fragile "
+            "import-order dependency.",
+            "Moved <code>setdefault</code> inside <code>main()</code> where it only applies "
+            "when the script is actually run as an entry point.",
+        ),
+    ]
+
+    rows = "".join(
+        f"""<tr>
+            <td style="font-size:11px;font-family:monospace;white-space:nowrap;color:#444">{loc}</td>
+            <td><strong>{title}</strong><br><span style="font-size:11px;color:#555">{problem}</span></td>
+            <td style="font-size:11px;color:#1a6b1a">{fix}</td>
+        </tr>"""
+        for loc, title, problem, fix in fixes
+    )
+
+    return f"""
+<h2>6. Code Quality Audit — Fixes Applied</h2>
+<p>A systematic review identified 7 bugs and design issues. All are fixed on this branch.
+The three highest-severity issues directly affect thesis validity.</p>
+<table>
+<tr>
+    <th style="width:18%">Location</th>
+    <th style="width:52%">Issue</th>
+    <th style="width:30%">Fix</th>
+</tr>
+{rows}
+</table>
+<div class="finding">
+    <b>Highest-impact for the thesis:</b>
+    (3) the duplicate model-constant issue — would silently corrupt ablation results;
+    (4) the narrative-chunker duration bug — incorrectly labels YTD facts in the Stage 1 evaluation;
+    (5) the trillion scorer bug — marks trillion-scale answers wrong in the FinanceBench evaluation.
+</div>
+"""
+
+
 def build_next_steps_section() -> str:
     return """
-<h2>6. Open Question — Scope Decision Before Full Evaluation</h2>
+<h2>7. Open Question — Scope Decision Before Full Evaluation</h2>
 <p>The 127-question FinanceBench evaluation has not yet run. A scope decision is needed first.</p>
 <p>The current index covers <strong>5 income-statement concepts</strong> (revenue, net income, EPS).
 FinanceBench asks about ~20 different financial metrics including CapEx, operating margins,
@@ -401,15 +504,30 @@ from both approaches, making the answer-accuracy metric uninformative.</p>
 # Main
 # ---------------------------------------------------------------------------
 
+def _try_section(name: str, fn) -> str:
+    """Run a section builder; return a placeholder if it fails (e.g. index not built)."""
+    try:
+        return fn()
+    except Exception as exc:
+        print(f"  WARNING: {name} skipped — {exc}")
+        return (
+            f'<h2>{name}</h2>'
+            f'<div class="finding" style="border-left-color:#e08800;background:#fffbe6">'
+            f'<b>Requires live data — run after building the Chroma index.</b><br>'
+            f'<code>{exc}</code></div>'
+        )
+
+
 def main() -> None:
     print("Building findings report...")
 
     sections = []
-    sections.append(build_problem_section())
+    sections.append(_try_section("1. The Problem", build_problem_section))
     sections.append(build_stage1_section())
-    sections.append(build_index_section())
-    sections.append(build_retrieval_section())
-    sections.append(build_generation_section())
+    sections.append(_try_section("3. Phase 1 — What's Been Built", build_index_section))
+    sections.append(_try_section("4. Retrieval Comparison", build_retrieval_section))
+    sections.append(_try_section("5. End-to-End Generation", build_generation_section))
+    sections.append(build_code_quality_section())
     sections.append(build_next_steps_section())
 
     body = "\n".join(sections)

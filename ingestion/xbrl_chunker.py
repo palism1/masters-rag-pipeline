@@ -24,14 +24,15 @@ from .xbrl_loader import XbrlFact
 def _humanize_value(value: float, unit: str) -> str:
     """Format raw value into a readable string with unit suffix."""
     if unit == "USD":
+        sign  = "-" if value < 0 else ""
         abs_v = abs(value)
         if abs_v >= 1e9:
-            return f"${value / 1e9:.3f}B"
+            return f"{sign}${abs_v / 1e9:.3f}B"
         if abs_v >= 1e6:
-            return f"${value / 1e6:.3f}M"
+            return f"{sign}${abs_v / 1e6:.3f}M"
         if abs_v >= 1e3:
-            return f"${value / 1e3:.3f}K"
-        return f"${value:,.2f}"
+            return f"{sign}${abs_v / 1e3:.3f}K"
+        return f"{sign}${abs_v:,.2f}"
     if unit == "shares":
         abs_v = abs(value)
         if abs_v >= 1e9:
