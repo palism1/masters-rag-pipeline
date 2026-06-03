@@ -188,8 +188,14 @@ _REFERENCE_TABLE: dict[tuple, float] = {
     # GOOG — manually verified against filing PDFs
     # -----------------------------------------------------------------------
 
-    # GOOG 10-K FY2023 (calendar year Jan–Dec 2023) — accession 0001652044-24-000022
-    ("GOOG", "Revenues", "2023-01-01", "2023-12-31", "USD"): 307_394_000_000,
+    # GOOG 10-K FY2023 — accession 0001652044-24-000022
+    # NOTE: Revenues is NOT used here because EDGAR re-tags annual facts when they
+    # appear as prior-year comparisons in later 10-Ks. The FY2023 Revenues row was
+    # re-tagged fiscal_year=2025 (appeared in the 2025 10-K comparison column) and
+    # is correctly dropped by _filter_comparative. This is itself a thesis finding:
+    # EDGAR's re-tagging applies to annual facts too, not just quarterly comparatives.
+    # NetIncomeLoss survived with its original fiscal_year=2023 tag.
+    ("GOOG", "NetIncomeLoss", "2023-01-01", "2023-12-31", "USD"): 73_795_000_000,
 
     # -----------------------------------------------------------------------
     # PEP (PepsiCo) — from EDGAR API, spot-check against accession
