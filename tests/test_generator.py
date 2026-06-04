@@ -73,6 +73,27 @@ def test_format_chunks_empty():
     assert _format_chunks([]) == ""
 
 
+def test_format_chunks_includes_plain_english_label():
+    """Concepts in CONCEPT_GLOSSARY render as 'XBRLName (Plain English)'."""
+    formatted = _format_chunks(_CHUNKS)
+    # NetIncomeLoss → "Net income (net earnings)" per the glossary
+    assert "NetIncomeLoss (Net income (net earnings))" in formatted
+
+
+def test_format_chunks_fallback_when_concept_unknown():
+    """Concepts absent from the glossary keep the bare XBRL name, no parens."""
+    chunk = [{
+        "text":          "Some unmapped fact.",
+        "fiscal_period": "FY2022-Q1",
+        "concept":       "SomeUnmappedConcept",
+        "entity":        "ACME INC",
+        "accession":     "0000000000-22-000001",
+    }]
+    formatted = _format_chunks(chunk)
+    assert "SomeUnmappedConcept" in formatted
+    assert "SomeUnmappedConcept (" not in formatted   # no empty/parenthesized label
+
+
 # ---------------------------------------------------------------------------
 # _parse_response
 # ---------------------------------------------------------------------------

@@ -32,15 +32,34 @@ import config
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Default concept list (US-GAAP income-statement + per-share).
-# Extend this list to pull additional line items.
+# Default concept list — income statement, cash flow, and key balance-sheet items.
+# Expanded from 5 → 15 to cover the full range of FinanceBench question types.
+# CHANGE ME: add concepts here to expand index coverage.
 # ---------------------------------------------------------------------------
 DEFAULT_CONCEPTS: list[str] = [
+    # Income statement
     "RevenueFromContractWithCustomerExcludingAssessedTax",  # ASC 606 revenue
-    "Revenues",                                             # older revenue tag
+    "Revenues",                                             # older / non-ASC-606 revenue tag
     "NetIncomeLoss",
     "EarningsPerShareBasic",
     "EarningsPerShareDiluted",
+    "OperatingIncomeLoss",                                  # operating margin questions
+    "GrossProfit",                                          # gross margin questions
+    "CostOfGoodsAndServicesSold",                          # COGS, DPO, inventory turnover
+
+    # Cash flow statement
+    "NetCashProvidedByUsedInOperatingActivities",           # operating CF, FCF conversion
+    "PaymentsToAcquirePropertyPlantAndEquipment",           # CapEx (negative: cash outflow)
+
+    # Balance sheet — assets
+    "Assets",                                               # total assets, ROA, asset turnover
+    "AssetsCurrent",                                        # current ratio, quick ratio
+    "CashAndCashEquivalentsAtCarryingValue",                # liquidity questions
+    "InventoryNet",                                         # inventory turnover, quick ratio
+    "AccountsReceivableNetCurrent",                         # net AR, DSO
+
+    # Balance sheet — liabilities
+    "LiabilitiesCurrent",                                   # current ratio, quick ratio (denominator)
 ]
 
 DEFAULT_FORM_TYPES: frozenset[str] = frozenset({"10-K", "10-Q"})

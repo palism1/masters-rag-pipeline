@@ -14,13 +14,13 @@ chunks, Claude will answer with a wrong number AND cite the wrong period — the
 error is traceable to retrieval, not to the model.
 
 FILE MAP
-  L001–L032  Module docstring + file map
-  L034–L063  Imports + CONFIG (model, token limit, k)
-  L065–L080  Lazy client singleton
-  L082–L110  Prompt construction — system prompt + chunk formatter
-  L112–L130  Response parser — extracts structured fields from Claude output
-  L132–L165  generate() — single-mode API call
-  L167–L205  generate_both() — primary entry point, calls both modes
+  Module docstring + file map
+  Imports + CONFIG (model, token limit, k, CONCEPT_GLOSSARY)
+  Lazy client singleton
+  Prompt construction — system prompt + concept-label + chunk formatter
+  Response parser — extracts structured fields from Claude output
+  generate() — single-mode API call
+  generate_both() — primary entry point, calls both modes
 
 Usage
 -----
@@ -68,6 +68,31 @@ MAX_TOKENS = 512
 # TWEAK: increase to give Claude more evidence; watch for context window limits.
 TOP_K = 5
 
+# Plain-English label for every XBRL concept in DEFAULT_CONCEPTS.
+# WHY: chunks are tagged with raw XBRL names (PaymentsToAcquirePropertyPlantAndEquipment)
+# but questions use plain terms ("capital expenditure"). Without the bridge, Claude
+# fails to connect the two and answers "Unable to determine" even with the right chunk
+# in context — the dominant cause of the 69%-retrieval / 5%-answer accuracy gap.
+# CHANGE ME: add an entry whenever you add a concept to DEFAULT_CONCEPTS.
+CONCEPT_GLOSSARY: dict[str, str] = {
+    "RevenueFromContractWithCustomerExcludingAssessedTax": "Revenue (net sales, ASC 606)",
+    "Revenues":                                            "Revenue (net sales)",
+    "NetIncomeLoss":                                       "Net income (net earnings)",
+    "EarningsPerShareBasic":                               "Basic EPS (earnings per share)",
+    "EarningsPerShareDiluted":                             "Diluted EPS (earnings per share)",
+    "OperatingIncomeLoss":                                 "Operating income (EBIT)",
+    "GrossProfit":                                         "Gross profit",
+    "CostOfGoodsAndServicesSold":                          "Cost of goods sold (COGS)",
+    "NetCashProvidedByUsedInOperatingActivities":          "Operating cash flow (cash from operations)",
+    "PaymentsToAcquirePropertyPlantAndEquipment":          "Capital expenditures (CapEx, PP&E purchases)",
+    "Assets":                                              "Total assets",
+    "AssetsCurrent":                                       "Current assets",
+    "CashAndCashEquivalentsAtCarryingValue":               "Cash and cash equivalents",
+    "InventoryNet":                                        "Inventory (net)",
+    "AccountsReceivableNetCurrent":                        "Accounts receivable (net AR)",
+    "LiabilitiesCurrent":                                  "Current liabilities",
+}
+
 # ===========================================================================
 
 _client: anthropic.Anthropic | None = None
@@ -92,11 +117,28 @@ _SYSTEM = """\
 You are a precise financial analyst. Answer questions using only the provided \
 context chunks from SEC filings. Be concise and exact.
 
+Each chunk header shows the XBRL concept name and its plain-English equivalent \
+in parentheses, e.g. "NetIncomeLoss (Net income)". Use the plain-English name to \
+match the question — a question about "capital expenditure" is answered by the \
+chunk labelled "CapEx", and so on.
+
 Always structure your response as:
 ANSWER: <your direct answer, including the specific dollar amount or value>
 FISCAL_PERIOD: <the fiscal period this answer covers, e.g. FY2022-Q1 or FY2022>
 SOURCE: <the SEC accession number of the chunk you relied on most>
 CONFIDENCE: <HIGH if the answer is directly stated in a chunk / LOW if inferred>"""
+
+
+def _concept_label(concept: str) -> str:
+    """
+    Render a concept as "XBRLName (Plain English)" for the chunk header.
+
+    WHY: the plain-English label is what lets Claude match the XBRL tag to the
+    question's wording. Concepts absent from the glossary fall back to the bare
+    XBRL name (no empty parentheses) so the header degrades gracefully.
+    """
+    plain = CONCEPT_GLOSSARY.get(concept)
+    return f"{concept} ({plain})" if plain else concept
 
 
 def _format_chunks(chunks: list[dict]) -> str:
@@ -105,7 +147,7 @@ def _format_chunks(chunks: list[dict]) -> str:
     for i, c in enumerate(chunks, 1):
         lines.append(
             f"[{i}] {c.get('entity', '')} | {c.get('fiscal_period', '?')} | "
-            f"{c.get('concept', '')} | accession: {c.get('accession', '?')}\n"
+            f"{_concept_label(c.get('concept', ''))} | accession: {c.get('accession', '?')}\n"
             f"    {c['text']}"
         )
     return "\n\n".join(lines)

@@ -147,12 +147,23 @@ def test_load_results_missing_file_returns_none():
 
 
 def test_available_models_skips_unknown_and_missing(capsys):
-    # 'bogus' is unknown; real slugs resolve to missing files in this sandbox.
-    resolved = available_models(["bogus", "minilm"])
-    assert resolved == []                               # nothing loadable here
+    # 'bogus' is an unknown slug; 'sentinel_test_slug' is a known but
+    # guaranteed-absent slug injected into MODELS for this test.
+    import evaluation.compare_models as cm
+    original = dict(cm.MODELS)
+    cm.MODELS["sentinel_test_slug"] = (
+        "Sentinel", "results/eval_results_sentinel_test_slug_DOES_NOT_EXIST.json"
+    )
+    try:
+        resolved = available_models(["bogus", "sentinel_test_slug"])
+    finally:
+        cm.MODELS.clear()
+        cm.MODELS.update(original)
+
+    assert resolved == []
     out = capsys.readouterr().out
     assert "unknown model slug 'bogus'" in out
-    assert "no results for 'minilm'" in out
+    assert "no results for 'sentinel_test_slug'" in out
 
 
 def test_partial_run_smaller_n_still_computes():

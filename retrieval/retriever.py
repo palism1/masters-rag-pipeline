@@ -14,12 +14,13 @@ Filtered retrieval degrades gracefully:
   fallback field records which path was taken so the eval harness can flag it
 
 FILE MAP
-  L001–L038  Module docstring + file map
-  L040–L062  CONFIG — default collection name, default embedding model, DEFAULT_K
-  L064–L090  Lazy per-model / per-collection singleton caches
-  L092–L122  Chroma where= clause builder + result packer + _query
-  L124–L195  retrieve() — single-mode retrieval with fallback logic
-  L197–L235  retrieve_both() — primary entry point, runs both modes
+  Module docstring + file map
+  CONFIG — default collection, default embedding model, DEFAULT_K, RATIO_CONCEPTS
+  Lazy per-model / per-collection singleton caches
+  Chroma where= clause builder + result packer + _query
+  retrieve() — single-mode retrieval with fallback logic
+  retrieve_multi_concept() — per-concept fan-out + merge for ratio questions
+  retrieve_both() — primary entry point, runs both modes (routes ratios)
 
 Usage
 -----
@@ -65,6 +66,24 @@ EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"   # CHANGE ME: ablation m
 
 # Default number of chunks returned per query.
 DEFAULT_K = 5                               # TWEAK
+
+# Financial ratios that require multiple XBRL concepts to compute.
+# WHY: standard top-k retrieval returns the single best-matching concept, so a
+# quick-ratio question yields AssetsCurrent chunks but rarely InventoryNet AND
+# LiabilitiesCurrent — Claude then can't compute the ratio. retrieve_both()
+# detects these phrases and fans out one filtered query per concept instead.
+# CHANGE ME: add a ratio phrase → concept list to support a new ratio question.
+RATIO_CONCEPTS: dict[str, list[str]] = {
+    "quick ratio":          ["AssetsCurrent", "InventoryNet", "LiabilitiesCurrent"],
+    "current ratio":        ["AssetsCurrent", "LiabilitiesCurrent"],
+    "inventory turnover":   ["CostOfGoodsAndServicesSold", "InventoryNet"],
+    "asset turnover":       ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax", "Assets"],
+    "operating margin":     ["OperatingIncomeLoss", "Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"],
+    "gross margin":         ["GrossProfit", "Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax"],
+    "fcf":                  ["NetCashProvidedByUsedInOperatingActivities", "PaymentsToAcquirePropertyPlantAndEquipment"],
+    "capex":                ["PaymentsToAcquirePropertyPlantAndEquipment"],
+    "days payable":         ["CostOfGoodsAndServicesSold", "AccountsReceivableNetCurrent"],
+}
 
 # ===========================================================================
 
@@ -202,6 +221,91 @@ def retrieve(
     return {"question": question, "filter_used": {}, "fallback": "none", "chunks": chunks}
 
 
+# ---------------------------------------------------------------------------
+# Multi-concept retrieval — for ratio questions
+# ---------------------------------------------------------------------------
+
+def _detect_ratio_concepts(question: str) -> list[str] | None:
+    """
+    Return the concept list for the first RATIO_CONCEPTS phrase in *question*.
+
+    WHY: a ratio question names a ratio ("quick ratio"), not the underlying
+    line items, so we map the phrase to every concept needed to compute it.
+    Returns None when the question names no known ratio (standard path applies).
+    """
+    q = question.lower()
+    for phrase, concepts in RATIO_CONCEPTS.items():
+        if phrase in q:
+            return concepts
+    return None
+
+
+def retrieve_multi_concept(
+    question: str,
+    concepts: list[str],
+    k: int = DEFAULT_K,
+    *,
+    model_name: str = EMBED_MODEL,
+    collection_name: str = COLLECTION_NAME,
+) -> dict:
+    """
+    Retrieve chunks for a ratio question by querying each concept separately.
+
+    Runs one filtered Chroma query per concept — each combining the ticker/period
+    filter from the query parser with a concept== constraint — then merges and
+    deduplicates by chunk id. This guarantees every line item a ratio needs is
+    represented, instead of letting one dominant concept crowd out the others in
+    a single top-k call.
+
+    Each per-concept query returns up to k chunks; the merged set therefore holds
+    up to len(concepts) * k chunks before dedup.
+
+    Returns the same shape as retrieve(), with two extra fields:
+      multi_concept — the concept list queried (flags the path for the eval harness)
+      fallback      — None | "ticker_only" | "none", the loosest filter any concept used
+    """
+    embedding = _get_model(model_name).encode(question, normalize_embeddings=True).tolist()
+    parsed = parse_query(question)
+
+    merged: dict[str, dict] = {}   # chunk id → chunk, preserves first (best) hit per id
+    loosest_fallback: str | None = None
+
+    for concept in concepts:
+        # concept filter combines with whatever ticker/period the parser found
+        base = {**parsed, "concept": concept}
+        chunks = _query(embedding, k, _build_where(base), collection_name=collection_name)
+        fallback = None
+
+        # Same graceful degradation as retrieve(): drop period, then drop all filters
+        if not chunks and "fiscal_period" in parsed:
+            ticker_filter = {"concept": concept}
+            if "ticker" in parsed:
+                ticker_filter["ticker"] = parsed["ticker"]
+            chunks = _query(embedding, k, _build_where(ticker_filter), collection_name=collection_name)
+            if chunks:
+                fallback = "ticker_only"
+        if not chunks:
+            chunks = _query(embedding, k, _build_where({"concept": concept}), collection_name=collection_name)
+            fallback = "none"
+
+        for c in chunks:
+            merged.setdefault(c["id"], c)
+
+        # Track the loosest filter any concept needed — surfaces the weakest link
+        if fallback == "none":
+            loosest_fallback = "none"
+        elif fallback == "ticker_only" and loosest_fallback != "none":
+            loosest_fallback = "ticker_only"
+
+    return {
+        "question":      question,
+        "filter_used":   parsed,
+        "fallback":      loosest_fallback,
+        "multi_concept": concepts,
+        "chunks":        list(merged.values()),
+    }
+
+
 def retrieve_both(
     question: str,
     k: int = 5,
@@ -219,20 +323,35 @@ def retrieve_both(
     collection for the ablation; they default to the minilm build and must be
     paired (a collection is only valid for the model it was built with).
 
+    Ratio routing: if the question names a ratio in RATIO_CONCEPTS, the filtered
+    side fans out one query per underlying concept (retrieve_multi_concept) so
+    every line item the ratio needs reaches Claude. Non-ratio questions keep the
+    standard single top-k path. The baseline is always pure ANN — unchanged — so
+    the comparison still isolates the effect of the filtered strategy.
+
     Returns
     -------
     {
         "question":      str,
         "parsed_filter": dict,   # what the query parser extracted
-        "filtered":      dict,   # retrieve() result with filtered=True
+        "filtered":      dict,   # retrieve() (or retrieve_multi_concept()) result
         "baseline":      dict,   # retrieve() result with filtered=False
     }
     """
+    ratio_concepts = _detect_ratio_concepts(question)
+    if ratio_concepts is not None:
+        filtered = retrieve_multi_concept(
+            question, ratio_concepts, k,
+            model_name=model_name, collection_name=collection_name,
+        )
+    else:
+        filtered = retrieve(question, k, filtered=True,
+                            model_name=model_name, collection_name=collection_name)
+
     return {
         "question":      question,
         "parsed_filter": parse_query(question),
-        "filtered":      retrieve(question, k, filtered=True,
-                                  model_name=model_name, collection_name=collection_name),
+        "filtered":      filtered,
         "baseline":      retrieve(question, k, filtered=False,
                                   model_name=model_name, collection_name=collection_name),
     }

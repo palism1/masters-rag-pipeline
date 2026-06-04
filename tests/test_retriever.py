@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import retrieval.retriever as ret
-from retrieval.retriever import _build_where, _pack_results
+from retrieval.retriever import _build_where, _detect_ratio_concepts, _pack_results
 
 
 # ---------------------------------------------------------------------------
@@ -185,3 +185,42 @@ def test_retrieve_both_structure(mock_model, mock_col):
     assert isinstance(result["parsed_filter"], dict)
     assert isinstance(result["filtered"]["chunks"], list)
     assert isinstance(result["baseline"]["chunks"], list)
+
+
+# ---------------------------------------------------------------------------
+# _detect_ratio_concepts — ratio question routing
+# ---------------------------------------------------------------------------
+
+def test_detect_ratio_quick_ratio():
+    concepts = _detect_ratio_concepts("What was Apple's quick ratio in FY2022?")
+    assert concepts == ["AssetsCurrent", "InventoryNet", "LiabilitiesCurrent"]
+
+
+def test_detect_ratio_case_insensitive():
+    """Detection lowercases the question, so capitalised phrasing still fires."""
+    assert _detect_ratio_concepts("Compute the GROSS MARGIN for 3M") is not None
+
+
+def test_detect_ratio_capex():
+    concepts = _detect_ratio_concepts("What was 3M's capex for FY2022?")
+    assert concepts == ["PaymentsToAcquirePropertyPlantAndEquipment"]
+
+
+def test_detect_ratio_none_for_plain_question():
+    """A non-ratio question returns None so the standard top-k path is used."""
+    assert _detect_ratio_concepts("What was PepsiCo's net income in Q1 2022?") is None
+
+
+@patch.object(ret, "_get_collection")
+@patch.object(ret, "_get_model")
+def test_retrieve_both_routes_ratio_to_multi_concept(mock_model, mock_col):
+    """A ratio question makes the filtered side use multi-concept retrieval."""
+    mock_model.return_value = _make_mock_model()
+    mock_col.return_value = _make_mock_collection()
+
+    result = ret.retrieve_both("What was Apple's quick ratio in FY2022?")
+
+    # multi_concept field is only present on the retrieve_multi_concept() path
+    assert result["filtered"]["multi_concept"] == [
+        "AssetsCurrent", "InventoryNet", "LiabilitiesCurrent"
+    ]
