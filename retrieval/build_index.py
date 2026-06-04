@@ -10,9 +10,17 @@ Set DRY_RUN=false in .env to actually persist to the index.
 
 Usage
 -----
-    python -m retrieval.build_index                    # all 32 FinanceBench companies
+    python -m retrieval.build_index                    # all 32 FinanceBench companies (minilm)
     python -m retrieval.build_index --subset 10q       # 7 companies with 10-Q questions
     python -m retrieval.build_index --subset stage1    # AAPL, MSFT, GOOG, NVDA (dev/smoke-test)
+    python -m retrieval.build_index --model finbert    # build the finbert collection (embedding ablation)
+
+FILE MAP
+  L001–L057  Module docstring + usage + file map
+  L059–L080  CONFIG — collection prefix, MODEL_REGISTRY (CHANGE ME), stage-1 companies
+  L082–L102  Doc ID + Chroma-safe metadata helpers
+  L104–L172  build() — embed chunks into the per-model collection
+  L174–L215  CLI parsing + main()
 """
 
 from __future__ import annotations
@@ -41,8 +49,29 @@ from ingestion.xbrl_loader import load_company_facts
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "financebench_xbrl"
-EMBED_MODEL = "all-MiniLM-L6-v2"
+# ===========================================================================
+# CONFIG
+# ===========================================================================
+
+# Collection-name prefix. The per-model collection is f"{COLLECTION_PREFIX}_{slug}",
+# e.g. "financebench_xbrl_minilm". Each model gets its own collection because
+# embeddings from different models live in incompatible vector spaces (and
+# different dimensions) — they cannot share an ANN index.
+COLLECTION_PREFIX = "financebench_xbrl"
+
+# CHANGE ME: maps a CLI slug → HuggingFace model ID. Add a row here to wire up a
+# new embedding model for the ablation; the slug also names its Chroma collection
+# and its results file (results/eval_results_{slug}.json).
+MODEL_REGISTRY: dict[str, str] = {
+    "minilm":  "sentence-transformers/all-MiniLM-L6-v2",   # general, fast, 384-dim (default)
+    "finbert": "ProsusAI/finbert",                          # domain-specific financial BERT, 768-dim
+    "mpnet":   "sentence-transformers/all-mpnet-base-v2",   # stronger general model, 768-dim
+}
+
+# Default model slug — keeps existing behaviour unchanged when --model is omitted.
+DEFAULT_MODEL = "minilm"                                    # TWEAK
+
+# ===========================================================================
 
 # Stage 1 tickers are not in FinanceBench but are useful for smoke-testing the
 # pipeline. CIKs are their SEC-registered identifiers.
@@ -75,12 +104,16 @@ def _safe_metadata(chunk: dict, ticker_label: str) -> dict:
     }
 
 
-def build(companies: list[FBCompany], dry_run: bool) -> None:
-    model = SentenceTransformer(EMBED_MODEL)
+def build(companies: list[FBCompany], dry_run: bool, slug: str = DEFAULT_MODEL) -> None:
+    embed_model      = MODEL_REGISTRY[slug]
+    collection_name  = f"{COLLECTION_PREFIX}_{slug}"
+
+    logger.info("Embedding model: %s → collection '%s'", embed_model, collection_name)
+    model = SentenceTransformer(embed_model)
 
     client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
     collection = client.get_or_create_collection(
-        name=COLLECTION_NAME,
+        name=collection_name,
         metadata={"hnsw:space": "cosine"},
     )
 
@@ -139,7 +172,7 @@ def build(companies: list[FBCompany], dry_run: bool) -> None:
     else:
         logger.info(
             "Index built. Collection '%s' now holds %d documents. (%d companies skipped)",
-            COLLECTION_NAME, collection.count(), skipped,
+            collection_name, collection.count(), skipped,
         )
 
 
@@ -158,6 +191,15 @@ def _parse_args() -> argparse.Namespace:
             "stage1  — AAPL/MSFT/GOOG/NVDA (smoke-test; only MSFT is in FinanceBench)"
         ),
     )
+    p.add_argument(
+        "--model",
+        choices=list(MODEL_REGISTRY),
+        default=DEFAULT_MODEL,
+        help=(
+            "Embedding model slug — selects both the model and its dedicated\n"
+            "Chroma collection (financebench_xbrl_{slug}). Default: %(default)s."
+        ),
+    )
     return p.parse_args()
 
 
@@ -172,10 +214,10 @@ def main() -> None:
         companies = list(FINANCEBENCH_COMPANIES)
 
     logger.info(
-        "build_index | subset=%s | companies=%d | dry_run=%s | chroma_dir=%s",
-        args.subset, len(companies), config.DRY_RUN, config.CHROMA_DIR,
+        "build_index | subset=%s | model=%s | companies=%d | dry_run=%s | chroma_dir=%s",
+        args.subset, args.model, len(companies), config.DRY_RUN, config.CHROMA_DIR,
     )
-    build(companies, dry_run=config.DRY_RUN)
+    build(companies, dry_run=config.DRY_RUN, slug=args.model)
 
 
 if __name__ == "__main__":

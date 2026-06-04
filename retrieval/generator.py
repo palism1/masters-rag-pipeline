@@ -43,7 +43,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import anthropic
 
 import config
-from retrieval.retriever import retrieve_both
+from retrieval.retriever import (
+    COLLECTION_NAME as DEFAULT_COLLECTION,
+    EMBED_MODEL as DEFAULT_MODEL_NAME,
+    retrieve_both,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +186,22 @@ def generate(question: str, chunks: list[dict]) -> dict:
 # Primary entry point
 # ---------------------------------------------------------------------------
 
-def generate_both(question: str, k: int = TOP_K) -> dict:
+def generate_both(
+    question: str,
+    k: int = TOP_K,
+    *,
+    model_name: str = DEFAULT_MODEL_NAME,
+    collection_name: str = DEFAULT_COLLECTION,
+) -> dict:
     """
     Run full pipeline — retrieve then generate — for both filtered and baseline.
 
     This is the primary entry point for the evaluation harness and the
     retrieval failure report.
+
+    model_name / collection_name select the embedding model and its dedicated
+    Chroma collection for the embedding ablation; they pass straight through to
+    retrieve_both() and default to the minilm build.
 
     Returns
     -------
@@ -206,7 +220,7 @@ def generate_both(question: str, k: int = TOP_K) -> dict:
         "baseline": { ... }      # same shape
     }
     """
-    retrieval = retrieve_both(question, k=k)
+    retrieval = retrieve_both(question, k=k, model_name=model_name, collection_name=collection_name)
 
     filtered_gen = generate(question, retrieval["filtered"]["chunks"])
     baseline_gen = generate(question, retrieval["baseline"]["chunks"])

@@ -2,7 +2,9 @@
 evaluation/eval_pipeline.py — Full evaluation of filtered vs baseline retrieval on FinanceBench.
 
 Runs generate_both() on all 127 in-scope FinanceBench questions (10-K + 10-Q),
-saves results to results/eval_results.json, then prints the comparison table.
+saves results to results/eval_results_{slug}.json, then prints the comparison
+table. The --model slug selects the embedding model, its dedicated Chroma
+collection, and the results file — so the three ablation runs stay independent.
 
 Resumable: already-completed questions are loaded from the results file and
 skipped on re-run — safe to interrupt and restart without losing progress or
@@ -27,9 +29,10 @@ FILE MAP
 
 Usage
 -----
-    python evaluation/eval_pipeline.py              # full 127 questions
-    python evaluation/eval_pipeline.py --limit 10   # first N questions (dev)
-    python evaluation/eval_pipeline.py --reset      # clear saved results and start fresh
+    python evaluation/eval_pipeline.py                  # full 127 questions (minilm)
+    python evaluation/eval_pipeline.py --limit 10       # first N questions (dev)
+    python evaluation/eval_pipeline.py --reset          # clear saved results and start fresh
+    python evaluation/eval_pipeline.py --model finbert  # evaluate the finbert collection (ablation)
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ os.environ.setdefault("DRY_RUN", "false")
 from datasets import load_dataset
 
 import config
+from retrieval.build_index import COLLECTION_PREFIX, MODEL_REGISTRY
 from retrieval.generator import generate_both
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s",
@@ -60,7 +64,19 @@ logger = logging.getLogger(__name__)
 # CONFIG — tweak these to change evaluation behaviour
 # ===========================================================================
 
-RESULTS_PATH = Path("results/eval_results.json")   # CHANGE ME: output path
+# Per-model results file. The slug (minilm | finbert | mpnet) names the output so
+# the three embedding-ablation runs don't overwrite each other; the default slug
+# reproduces the original results/eval_results_minilm.json.
+RESULTS_DIR  = Path("results")                     # CHANGE ME: output directory
+DEFAULT_MODEL_SLUG = "minilm"                      # TWEAK: default embedding model
+
+
+def _results_path(slug: str) -> Path:
+    """results/eval_results_{slug}.json — one file per embedding model."""
+    return RESULTS_DIR / f"eval_results_{slug}.json"
+
+
+RESULTS_PATH = _results_path(DEFAULT_MODEL_SLUG)   # default; overridden per-run by --model
 IN_SCOPE     = {"10k", "10q"}                      # 8-K and Earnings not XBRL-indexed
 
 # Numeric answer scorer tolerance — answers within ±5% of ground truth count as correct.
@@ -203,26 +219,39 @@ def _score_mode(gen: dict, mode: str, ground_truth: str, true_period: str | None
 # Evaluation runner
 # ---------------------------------------------------------------------------
 
-def _load_results() -> dict:
-    if RESULTS_PATH.exists():
-        return json.loads(RESULTS_PATH.read_text())
+def _load_results(results_path: Path = RESULTS_PATH) -> dict:
+    if results_path.exists():
+        return json.loads(results_path.read_text())
     return {}
 
 
-def _save_results(results: dict) -> None:
-    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    RESULTS_PATH.write_text(json.dumps(results, indent=2))
+def _save_results(results: dict, results_path: Path = RESULTS_PATH) -> None:
+    results_path.parent.mkdir(parents=True, exist_ok=True)
+    results_path.write_text(json.dumps(results, indent=2))
 
 
-def run(limit: int | None = None, reset: bool = False) -> dict:
+def run(
+    limit: int | None = None,
+    reset: bool = False,
+    slug: str = DEFAULT_MODEL_SLUG,
+) -> dict:
     """
-    Run the evaluation loop. Returns the full results dict.
+    Run the evaluation loop for one embedding model. Returns the full results dict.
 
-    Saves after every question — safe to interrupt. Set reset=True to discard
-    previous results and start from scratch.
+    The slug (minilm | finbert | mpnet) selects the embedding model, its dedicated
+    Chroma collection, and the results file — so the three ablation runs are fully
+    independent. Saves after every question; safe to interrupt. Set reset=True to
+    discard previous results and start from scratch.
     """
-    if reset and RESULTS_PATH.exists():
-        RESULTS_PATH.unlink()
+    results_path    = _results_path(slug)
+    model_name      = MODEL_REGISTRY[slug]
+    collection_name = f"{COLLECTION_PREFIX}_{slug}"
+
+    logger.info("Model: %s (%s) → collection '%s' | results → %s",
+                slug, model_name, collection_name, results_path)
+
+    if reset and results_path.exists():
+        results_path.unlink()
         logger.info("Results cleared.")
 
     logger.info("Loading FinanceBench...")
@@ -232,7 +261,7 @@ def run(limit: int | None = None, reset: bool = False) -> dict:
         rows = rows[:limit]
     logger.info("%d in-scope questions loaded.", len(rows))
 
-    results = _load_results()
+    results = _load_results(results_path)
     skipped = sum(1 for r in rows if r["financebench_id"] in results)
     if skipped:
         logger.info("Resuming — %d already done, %d remaining.", skipped, len(rows) - skipped)
@@ -249,7 +278,7 @@ def run(limit: int | None = None, reset: bool = False) -> dict:
         logger.info("[%d/%d] %s — %s", i + 1, len(rows), row["company"], question[:60])
 
         try:
-            gen = generate_both(question)
+            gen = generate_both(question, model_name=model_name, collection_name=collection_name)
         except Exception as exc:
             logger.warning("SKIP %s — %s", fid, exc)
             continue
@@ -267,7 +296,7 @@ def run(limit: int | None = None, reset: bool = False) -> dict:
             "baseline":        _score_mode(gen, "baseline", ground_truth, true_period),
         }
 
-        _save_results(results)
+        _save_results(results, results_path)
         time.sleep(API_CALL_DELAY)
 
     return results
@@ -277,7 +306,7 @@ def run(limit: int | None = None, reset: bool = False) -> dict:
 # Metrics display
 # ---------------------------------------------------------------------------
 
-def print_metrics(results: dict) -> None:
+def print_metrics(results: dict, results_path: Path = RESULTS_PATH) -> None:
     """Print the comparison table to stdout after a completed or partial run."""
     rows = list(results.values())
     n    = len(rows)
@@ -322,7 +351,7 @@ def print_metrics(results: dict) -> None:
         print(f"  {mode.upper()} answer scores: " +
               "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
     print()
-    print(f"Results saved → {RESULTS_PATH}")
+    print(f"Results saved → {results_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -336,10 +365,14 @@ def main() -> None:
                    help="Evaluate only the first N questions (dev/test)")
     p.add_argument("--reset", action="store_true",
                    help="Clear saved results and start from scratch")
+    p.add_argument("--model", choices=list(MODEL_REGISTRY), default=DEFAULT_MODEL_SLUG,
+                   help="Embedding model slug — selects the model, its Chroma "
+                        "collection, and results/eval_results_{slug}.json "
+                        "(default: %(default)s)")
     args = p.parse_args()
 
-    results = run(limit=args.limit, reset=args.reset)
-    print_metrics(results)
+    results = run(limit=args.limit, reset=args.reset, slug=args.model)
+    print_metrics(results, _results_path(args.model))
 
 
 if __name__ == "__main__":
